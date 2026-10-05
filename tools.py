@@ -20,9 +20,139 @@ That last line is what your loop branches on. "Returns a list" earns nothing —
 the description has to say what is *in* the list.
 """
 
-import config  # noqa: F401 — you'll use this in search_listings
+import re
+
+import config
 from generate import generate
 from utils.data_loader import load_listings
+
+_LETTER_SIZES = ("XXS", "XS", "XXL", "XL", "S", "M", "L")
+_STOPWORDS = {
+    "a", "an", "the", "in", "for", "of", "and", "or", "with", "to", "on",
+}
+_TOKEN_RE = re.compile(r"[a-z0-9]+")
+_SHOE_RE = re.compile(r"\bus\s+(\d+(?:\.\d+)?)\b", re.IGNORECASE)
+_WAIST_RE = re.compile(r"\bw(\d+)\b", re.IGNORECASE)
+_ONE_SIZE_RE = re.compile(r"\bone\s*size\b", re.IGNORECASE)
+_LETTER_TOKEN_RE = re.compile(r"[A-Z0-9.]+")
+
+
+def _letter_tokens(size_str: str) -> set[str]:
+    """
+    Clothing letter sizes as whole tokens, never substrings.
+
+    "S/M" → {S, M}; "XL (oversized)" → {XL}; "US 9" → {}; "W30 L30" → {}.
+    That last one matters: a naive `"l" in "w30 l30"` would treat jeans as L.
+    """
+    tokens = set()
+    for part in _LETTER_TOKEN_RE.findall(size_str.upper()):
+        if part in _LETTER_SIZES:
+            tokens.add(part)
+    return tokens
+
+
+def _size_matches(listing_size: str, query_size: str) -> bool:
+    """
+    True when the listing can count as the requested size.
+
+    - Letter sizes match themselves and slash ranges: M matches M, S/M, M/L.
+    - They do not match as substrings: S does not match US 9; L does not match XL.
+    - A numeric query matches a US shoe size or a W-waist of that number.
+    - "One Size" matches a letter-size request (cardigans, belts, bags), not shoes.
+    """
+    wanted = query_size.strip()
+    if not wanted:
+        return True
+
+    listing = listing_size or ""
+
+    if re.fullmatch(r"\d+(?:\.\d+)?", wanted):
+        shoe = _SHOE_RE.search(listing)
+        if shoe and float(shoe.group(1)) == float(wanted):
+            return True
+        waist = _WAIST_RE.search(listing)
+        if waist and "." not in wanted and waist.group(1) == wanted:
+            return True
+        return False
+
+    wanted_letters = _letter_tokens(wanted)
+    if wanted_letters and wanted_letters & _letter_tokens(listing):
+        return True
+    if wanted_letters and _ONE_SIZE_RE.search(listing):
+        return True
+    return listing.strip().casefold() == wanted.casefold()
+
+
+def _tokens(text: str) -> list[str]:
+    return [
+        t
+        for t in _TOKEN_RE.findall(text.lower())
+        if t not in _STOPWORDS and len(t) > 1
+    ]
+
+
+def _tokens_close(query_token: str, listing_token: str) -> bool:
+    if query_token == listing_token:
+        return True
+    return query_token + "s" == listing_token or listing_token + "s" == query_token
+
+
+def _keyword_score(listing: dict, description: str) -> int:
+    keywords = _tokens(description)
+    if not keywords:
+        return 0
+
+    # Title/tags/category are the real match signal. The prose description
+    # often says things like "layer under a graphic tee", which is not the
+    # item being a graphic tee.
+    primary_text = " ".join(
+        [
+            listing.get("title") or "",
+            listing.get("category") or "",
+            " ".join(listing.get("style_tags") or []),
+            " ".join(listing.get("colors") or []),
+            listing.get("brand") or "",
+        ]
+    )
+    primary = _tokens(primary_text)
+    secondary = _tokens(listing.get("description") or "")
+
+    score = 0
+    for kw in keywords:
+        if any(_tokens_close(kw, t) for t in primary):
+            score += 2
+        elif any(_tokens_close(kw, t) for t in secondary):
+            score += 1
+
+    phrase = " ".join(keywords)
+    if phrase and phrase in primary_text.lower():
+        score += 2
+    return score
+
+
+def _format_listing(item: dict) -> str:
+    tags = ", ".join(item.get("style_tags") or []) or "none"
+    colors = ", ".join(item.get("colors") or []) or "unlisted"
+    brand = item.get("brand") or "unbranded"
+    return (
+        f"{item.get('title')} — ${item.get('price')} on {item.get('platform')}, "
+        f"size {item.get('size')}, {item.get('condition')} condition, "
+        f"colors: {colors}, tags: {tags}, brand: {brand}"
+    )
+
+
+def _format_wardrobe(items: list) -> str:
+    lines = []
+    for piece in items:
+        notes = piece.get("notes")
+        extra = f" — {notes}" if notes else ""
+        colors = ", ".join(piece.get("colors") or [])
+        tags = ", ".join(piece.get("style_tags") or [])
+        lines.append(
+            f"- {piece.get('name')} ({piece.get('category')}; "
+            f"colors: {colors}; tags: {tags}{extra})"
+        )
+    return "\n".join(lines)
 
 
 # ── Tool 1: search_listings ───────────────────────────────────────────────────
@@ -78,8 +208,21 @@ def search_listings(
     Test it from a terminal before you move on:
         python -c "from tools import search_listings; print(search_listings('graphic tee', max_price=30))"
     """
-    # TODO: replace this with your implementation
-    return []
+    listings = load_listings()
+    scored: list[tuple[int, dict]] = []
+
+    for listing in listings:
+        if max_price is not None and listing["price"] > max_price:
+            continue
+        if size is not None and not _size_matches(listing.get("size") or "", size):
+            continue
+        score = _keyword_score(listing, description)
+        if score <= 0:
+            continue
+        scored.append((score, listing))
+
+    scored.sort(key=lambda pair: pair[0], reverse=True)
+    return [listing for _, listing in scored[: config.SEARCH_RESULT_LIMIT]]
 
 
 # ── Tool 2: suggest_outfit ────────────────────────────────────────────────────
@@ -112,8 +255,32 @@ def suggest_outfit(new_item: dict, wardrobe: dict) -> str:
     Test it from a terminal before you move on:
         python -c "from tools import suggest_outfit; from utils.data_loader import get_example_wardrobe, load_listings; print(suggest_outfit(load_listings()[0], get_example_wardrobe()))"
     """
-    # TODO: replace this with your implementation
-    return ""
+    items = (wardrobe or {}).get("items") or []
+    item_blurb = _format_listing(new_item)
+
+    if not items:
+        prompt = (
+            "A shopper has no saved wardrobe yet. Give general styling ideas "
+            "for this thrifted piece — silhouettes, colors, and shoes that "
+            "would work with it. One or two outfits. Be specific, not generic.\n\n"
+            f"Item:\n{item_blurb}"
+        )
+    else:
+        prompt = (
+            "Suggest one or two outfits that pair this thrifted find with "
+            "pieces the shopper already owns. Name those wardrobe pieces "
+            "explicitly. Keep it wearable and specific.\n\n"
+            f"New item:\n{item_blurb}\n\n"
+            f"Wardrobe:\n{_format_wardrobe(items)}"
+        )
+
+    return generate(
+        prompt,
+        system=(
+            "You style secondhand clothes. Reply with outfit suggestions only — "
+            "no preamble, no bullet-point inventory dump."
+        ),
+    )
 
 
 # ── Tool 3: create_fit_card ───────────────────────────────────────────────────
@@ -152,5 +319,30 @@ def create_fit_card(outfit: str, new_item: dict) -> str:
     Test it from a terminal before you move on:
         python -c "from tools import create_fit_card; from utils.data_loader import load_listings; print(create_fit_card('jeans and white sneakers', load_listings()[0]))"
     """
-    # TODO: replace this with your implementation
-    return ""
+    if not (outfit or "").strip():
+        title = new_item.get("title") or "this piece"
+        price = new_item.get("price")
+        platform = new_item.get("platform") or "the listing site"
+        price_bit = (
+            f"${price:g}" if isinstance(price, (int, float)) else "an unknown price"
+        )
+        return (
+            f"No outfit suggestion to caption. The find is {title} "
+            f"({price_bit} on {platform})."
+        )
+
+    prompt = (
+        "Write a 2–4 sentence social caption about this thrift find. "
+        "Sound like a real post, not a product listing. Mention the item, "
+        "its price, and the platform exactly once each. Be specific about "
+        "the vibe, using the outfit suggestion.\n\n"
+        f"Item:\n{_format_listing(new_item)}\n\n"
+        f"Outfit suggestion:\n{outfit.strip()}"
+    )
+    return generate(
+        prompt,
+        system=(
+            "You write short thrift-haul captions. Two to four sentences. "
+            "No hashtag walls, no 'link in bio'."
+        ),
+    )

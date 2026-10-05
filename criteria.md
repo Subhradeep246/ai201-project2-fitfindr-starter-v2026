@@ -25,9 +25,10 @@ Given a query that matches at least one listing, the agent completes all three
 tool calls and returns a fit card — in at least 4 of 5 tries.
 
 **Why this target:**
-<!-- Why 4 of 5 and not 5 of 5? Something about your search, probably —
-     "my search is a plain keyword match and some phrasings will miss" is a
-     real answer. -->
+`search_listings` is a keyword-overlap score, not a semantic search. A query
+that a person would treat as the same request — "graphic t-shirt" instead of
+"graphic tee" — can score zero and take the empty-search branch. 4 of 5 leaves
+room for one phrasing miss without pretending the search understands synonyms.
 
 ---
 
@@ -37,26 +38,25 @@ Given a query that matches no listings, the agent stops before calling
 `suggest_outfit` and returns a message naming what to change — 5 of 5 tries.
 
 **Why this target:**
-<!-- Why is 5 of 5 reasonable here when criterion 1 isn't? What's different
-     about this path? -->
+This path never calls the model. `search_listings` returns `[]`, and
+`run_agent` writes `session["error"]` from the parsed size and price, then
+returns. There is no temperature and no synonym problem, so 5 of 5 is the
+right bar — if this misses, the branch is broken, not "unlucky."
 
 ---
 
 ## 3. Something about state
 
-<!-- YOU WRITE THIS ONE.
-
-     How would you know that the item your search found is the same item the
-     next tool received? Name something countable or observable.
-
-     This is the criterion people find hardest, because state failure doesn't
-     look like state failure — it looks like a tool problem. Something that
-     compares session["selected_item"] against what actually reached
-     suggest_outfit is the shape you're after. -->
-
-
+On a matching query, `session["selected_item"]["id"]` equals
+`session["search_results"][0]["id"]`, and `session["outfit_suggestion"]` is a
+non-empty string produced after that selection — 5 of 5 tries.
 
 **Why this target:**
+The loop is supposed to pass the first hit through the session, not ask the
+user to type the item again. If `selected_item` is a different listing than
+`search_results[0]`, or the outfit is filled in while `selected_item` is still
+`None`, the tools can look fine and the wiring is still wrong. 5 of 5 is
+fair because this is an assignment in `run_agent`, not a model judgment.
 
 
 
@@ -64,20 +64,17 @@ Given a query that matches no listings, the agent stops before calling
 
 ## 4. Something about the fit card
 
-<!-- YOU WRITE THIS ONE.
-
-     The fit card calls a model, so the same input can produce different words
-     each time. That's not a bug — it's the nature of the tool. So what would
-     make it acceptable?
-
-     Think about what you'd actually be unhappy to see. A caption that never
-     mentions the price? Two different items producing the same opening
-     sentence? A card longer than a caption anyone would post? Any of those can
-     be turned into a number. -->
-
-
+On a matching query, the fit card is 2–4 sentences and, case-insensitively,
+contains the listing's platform (`depop`, `thredup`, or `poshmark`) and a
+price cue (a digit from `selected_item["price"]`, or the word `dollar`) —
+in at least 4 of 5 tries.
 
 **Why this target:**
+I would actually be unhappy with a caption that reads like a vibe paragraph
+and never says what it cost or where it was listed. Word-for-word sameness is
+the wrong target: `TEMPERATURE` is 0.9 and the cache is off during eval, so
+the sentences will move. 4 of 5 leaves room for one run that spells the price
+in a way I didn't count, or drops the platform.
 
 
 
@@ -85,16 +82,15 @@ Given a query that matches no listings, the agent stops before calling
 
 ## 5. Your choice
 
-<!-- YOU WRITE THIS ONE TOO.
-
-     Pick something you actually care about getting right. Speed, the empty
-     wardrobe path, what happens when the model can't be reached, whether the
-     search respects a price ceiling — anything, as long as it names a number
-     or an observable outcome. -->
-
-
+When the parsed query has a `max_price` and search returns at least one hit,
+every listing in `session["search_results"]` has `price <= max_price` —
+5 of 5 tries.
 
 **Why this target:**
+A price ceiling that is quietly ignored looks like a successful search. The
+filter is an inclusive numeric comparison with no model in the middle, so 5
+of 5 is the right target. If this misses, `search_listings` dropped the
+ceiling or `parse_query` never pulled the dollar amount out of the text.
 
 
 
