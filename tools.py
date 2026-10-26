@@ -283,8 +283,12 @@ def search_listings(
         if score <= 0:
             continue
         nouns = _item_nouns(description)
-        if nouns and not all(_primary_has_noun(listing, noun) for noun in nouns):
-            continue
+        if nouns:
+            # Every query token must show up in title/category/tags — not just
+            # the noun. Otherwise "denim jacket" still returns any jacket.
+            needed = _tokens(description)
+            if not all(_primary_has_noun(listing, token) for token in needed):
+                continue
         scored.append((score, listing))
 
     scored.sort(key=lambda pair: pair[0], reverse=True)

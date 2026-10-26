@@ -63,7 +63,7 @@ an outfit for an item that does not exist.
 
 ### `search_listings`
 
-- **What it does:** Loads every listing, drops anything over `max_price` when a ceiling is given, drops anything that fails the size rule when a size is given, scores the rest by keyword overlap with `description` (title, tags, and category count more than the prose description), and if the query names an item noun (`jacket`, `tee`, `dress`, …) drops listings that do not carry that noun in the title, category, or tags. Returns the best matches first.
+- **What it does:** Loads every listing, drops anything over `max_price` when a ceiling is given, drops anything that fails the size rule when a size is given, scores the rest by keyword overlap with `description` (title, tags, and category count more than the prose description), and if the query names an item noun (`jacket`, `tee`, `dress`, …) drops listings that do not carry every query token in the title, category, or tags. Returns the best matches first.
 - **Inputs:** `description` (str), `size` (str or None), `max_price` (float or None, inclusive). Size match is case-insensitive whole tokens, not substrings: `M` matches `M`, `S/M`, and `M/L`; `S` does not match `US 9`; `L` does not match `XL` or `W30 L30`. A numeric size matches a `US` shoe size or a `W` waist of that number. `One Size` matches a letter-size request, not a shoe size.
 - **Returns:** A list of listing dicts, highest score first, at most `config.SEARCH_RESULT_LIMIT` (10). Each dict has `id`, `title`, `description`, `category`, `style_tags` (list), `size`, `condition`, `price` (float), `colors` (list), `brand` (str or None), `platform`.
 - **When it has nothing:** An empty list `[]` — not None, not an exception. That is what the loop branches on.
@@ -403,7 +403,7 @@ The five numbered criteria already MET. The leftover targets from the first afte
 - Empty wardrobe prompt now forbids inventing a fake closet. Rechecked with `--empty-wardrobe`.
 - Fit cards already used `$` + digits + platform on the after log; that guard stayed.
 
-Still adjacent, not a missed criterion: `denim jacket` can still return the navy track jacket, because that listing really is a jacket. I stopped once jeans were gone. Empty-wardrobe outfits still name generic silhouettes (ribbed tank, loafers) — that is the spec, not a fake closet.
+Still adjacent, not a missed criterion: empty-wardrobe outfits still name generic silhouettes (ribbed tank, loafers) — that is the spec, not a fake closet. `denim jacket` now returns only the cropped denim jacket; the track jacket is gone because every query token has to appear in title/tags/category.
 
 
 
