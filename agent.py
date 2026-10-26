@@ -15,10 +15,10 @@ Build and test your three tools in `tools.py` first. Then come here.
 
 import re
 
-import config
 import trace
-from tools import search_listings, suggest_outfit, create_fit_card
-from generate import ModelUnavailable  # noqa: F401 — used in unit 4
+from generate import ModelUnavailable
+from mcp_client import call_tool, MCPError
+from tools import suggest_outfit, create_fit_card
 
 
 # ── session state ─────────────────────────────────────────────────────────────
@@ -189,49 +189,118 @@ def run_agent(query: str, wardrobe: dict) -> dict:
     count = 0
     next_step = "parse"
 
-    while next_step is not None:
-        count += 1
-        trace.check_iterations(count)
+    try:
+        while next_step is not None:
+            count += 1
+            trace.check_iterations(count)
 
-        if next_step == "parse":
-            session["parsed"] = parse_query(query)
-            next_step = "search"
+            if next_step == "parse":
+                parsed = parse_query(query)
+                session["parsed"] = parsed
+                trace.step(
+                    "parse_query",
+                    inputs=query,
+                    returned=(
+                        f"description={parsed['description']!r} "
+                        f"size={parsed.get('size')!r} "
+                        f"max_price={parsed.get('max_price')!r}"
+                    ),
+                )
+                next_step = "search"
 
-        elif next_step == "search":
-            parsed = session["parsed"]
-            results = search_listings(
-                parsed["description"],
-                size=parsed.get("size"),
-                max_price=parsed.get("max_price"),
-            )
-            session["search_results"] = results
-            if not results:
-                session["error"] = _empty_search_message(parsed)
+            elif next_step == "search":
+                parsed = session["parsed"]
+                mcp_args = {
+                    "description": parsed["description"],
+                    "size": parsed.get("size"),
+                    "max_price": parsed.get("max_price"),
+                }
+                results = call_tool("search_listings", mcp_args)
+                session["search_results"] = results
+                if not results:
+                    session["error"] = _empty_search_message(parsed)
+                    trace.step(
+                        "search_listings (via MCP)",
+                        inputs=mcp_args,
+                        returned=results,
+                        note="branch: empty, stopping before suggest_outfit",
+                    )
+                    next_step = None
+                else:
+                    trace.step(
+                        "search_listings (via MCP)",
+                        inputs=mcp_args,
+                        returned=results,
+                        note="branch: hits found, continuing to select",
+                    )
+                    next_step = "select"
+
+            elif next_step == "select":
+                session["selected_item"] = session["search_results"][0]
+                trace.step(
+                    "select",
+                    inputs={"first_result_id": session["search_results"][0].get("id")},
+                    returned=session["selected_item"],
+                    note="selected_item is search_results[0]",
+                )
+                next_step = "suggest"
+
+            elif next_step == "suggest":
+                wardrobe = session["wardrobe"] or {}
+                empty_closet = not (wardrobe.get("items") or [])
+                outfit = suggest_outfit(
+                    session["selected_item"],
+                    session["wardrobe"],
+                )
+                session["outfit_suggestion"] = outfit
+                trace.step(
+                    "suggest_outfit",
+                    inputs={
+                        "item": session["selected_item"],
+                        "wardrobe_items": len(wardrobe.get("items") or []),
+                    },
+                    returned=outfit,
+                    note="empty wardrobe: general styling" if empty_closet else "",
+                )
+                next_step = "fit_card"
+
+            elif next_step == "fit_card":
+                card = create_fit_card(
+                    session["outfit_suggestion"],
+                    session["selected_item"],
+                )
+                session["fit_card"] = card
+                trace.step(
+                    "create_fit_card",
+                    inputs={
+                        "outfit": session["outfit_suggestion"],
+                        "item": session["selected_item"],
+                    },
+                    returned=card,
+                )
                 next_step = None
+
             else:
-                next_step = "select"
+                session["error"] = f"Unknown planning step: {next_step}"
+                trace.step("unknown_step", note=session["error"])
+                next_step = None
 
-        elif next_step == "select":
-            session["selected_item"] = session["search_results"][0]
-            next_step = "suggest"
-
-        elif next_step == "suggest":
-            session["outfit_suggestion"] = suggest_outfit(
-                session["selected_item"],
-                session["wardrobe"],
-            )
-            next_step = "fit_card"
-
-        elif next_step == "fit_card":
-            session["fit_card"] = create_fit_card(
-                session["outfit_suggestion"],
-                session["selected_item"],
-            )
-            next_step = None
-
-        else:
-            session["error"] = f"Unknown planning step: {next_step}"
-            next_step = None
+    except ModelUnavailable as exc:
+        session["error"] = (
+            "The model could not be reached, so FitFindr stopped after search "
+            f"instead of inventing an outfit. {exc}"
+        )
+        trace.step(
+            "ModelUnavailable",
+            note="caught in run_agent; suggest_outfit/create_fit_card skipped",
+            returned=str(exc),
+        )
+    except MCPError as exc:
+        session["error"] = (
+            "Search over MCP failed, so the run stopped before styling. "
+            f"{exc}"
+        )
+        trace.step("MCPError", note="search_listings via MCP failed", returned=str(exc))
 
     return session
 

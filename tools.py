@@ -130,6 +130,43 @@ def _keyword_score(listing: dict, description: str) -> int:
     return score
 
 
+def _sentence_count(text: str) -> int:
+    return len([bit for bit in re.split(r"[.!?]+", text.strip()) if bit.strip()])
+
+
+def _ensure_price_and_platform(card: str, platform: str, price_bit: str | None) -> str:
+    """
+    Keep the model's voice, but don't let a spelled-out price drop the
+    platform/$ cue the fit-card criterion actually checks.
+    """
+    text = (card or "").strip()
+    if not text:
+        return text
+
+    low = text.lower()
+    has_platform = bool(platform) and platform.lower() in low
+    has_dollar_amount = bool(re.search(r"\$\s*\d", text))
+    if has_platform and has_dollar_amount:
+        return text
+
+    extras = []
+    if price_bit and not has_dollar_amount:
+        extras.append(price_bit)
+    if platform and not has_platform:
+        extras.append(f"on {platform}")
+    if not extras:
+        return text
+
+    extra = "Listed " + " ".join(extras) + "."
+    if _sentence_count(text) >= 4:
+        if text[-1] in ".!?":
+            return text[:-1] + f" — {extra[:-1]}."
+        return f"{text} {extra}"
+    if text[-1] not in ".!?":
+        text += "."
+    return f"{text} {extra}"
+
+
 def _format_listing(item: dict) -> str:
     tags = ", ".join(item.get("style_tags") or []) or "none"
     colors = ", ".join(item.get("colors") or []) or "unlisted"
@@ -331,18 +368,30 @@ def create_fit_card(outfit: str, new_item: dict) -> str:
             f"({price_bit} on {platform})."
         )
 
+    platform = (new_item.get("platform") or "").strip()
+    price = new_item.get("price")
+    price_bit = (
+        f"${price:g}" if isinstance(price, (int, float)) else None
+    )
+
     prompt = (
         "Write a 2–4 sentence social caption about this thrift find. "
         "Sound like a real post, not a product listing. Mention the item, "
-        "its price, and the platform exactly once each. Be specific about "
+        "its price as digits with a dollar sign "
+        f"(exactly {price_bit or 'the listing price'}), "
+        "and the platform name "
+        f"(exactly {platform or 'the listing site'}) "
+        "once each. Do not spell the price out as words. Be specific about "
         "the vibe, using the outfit suggestion.\n\n"
         f"Item:\n{_format_listing(new_item)}\n\n"
         f"Outfit suggestion:\n{outfit.strip()}"
     )
-    return generate(
+    card = generate(
         prompt,
         system=(
             "You write short thrift-haul captions. Two to four sentences. "
+            "Always include a $ amount in digits and the platform name. "
             "No hashtag walls, no 'link in bio'."
         ),
     )
+    return _ensure_price_and_platform(card, platform, price_bit)
