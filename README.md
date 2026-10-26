@@ -63,7 +63,7 @@ an outfit for an item that does not exist.
 
 ### `search_listings`
 
-- **What it does:** Loads every listing, drops anything over `max_price` when a ceiling is given, drops anything that fails the size rule when a size is given, scores the rest by keyword overlap with `description` (title, tags, and category count more than the prose description), and returns the best matches first.
+- **What it does:** Loads every listing, drops anything over `max_price` when a ceiling is given, drops anything that fails the size rule when a size is given, scores the rest by keyword overlap with `description` (title, tags, and category count more than the prose description), and if the query names an item noun (`jacket`, `tee`, `dress`, …) drops listings that do not carry that noun in the title, category, or tags. Returns the best matches first.
 - **Inputs:** `description` (str), `size` (str or None), `max_price` (float or None, inclusive). Size match is case-insensitive whole tokens, not substrings: `M` matches `M`, `S/M`, and `M/L`; `S` does not match `US 9`; `L` does not match `XL` or `W30 L30`. A numeric size matches a `US` shoe size or a `W` waist of that number. `One Size` matches a letter-size request, not a shoe size.
 - **Returns:** A list of listing dicts, highest score first, at most `config.SEARCH_RESULT_LIMIT` (10). Each dict has `id`, `title`, `description`, `category`, `style_tags` (list), `size`, `condition`, `price` (float), `colors` (list), `brand` (str or None), `platform`.
 - **When it has nothing:** An empty list `[]` — not None, not an exception. That is what the loop branches on.
@@ -397,11 +397,13 @@ The scoreboard did not move — C4 was already 5/5. The mechanism did. Before, C
 
 ## What's Still Broken
 
-The five numbered criteria all MET after the change, so there is no missed target left to chase. What is still wrong is adjacent:
+The five numbered criteria already MET. The leftover targets from the first after-run were adjacent, and this redo was those:
 
-- `search_listings` still ranks `Vintage Levi's 501 Jeans` for `denim jacket under $50` because `denim` hits in the title/tags and `jacket` can appear in the prose. Criterion 3 does not care — it only checks that the first hit is the one styled — but a user asking for a jacket should not get jeans in the top three. Next change would be requiring category nouns (`jacket`, `dress`, `tee`) to match title/category/tags, not the description.
-- Empty wardrobe still invents specific garments (olive trousers, Converse) instead of staying at silhouettes. The path does not crash, which is the failure-mode bar, but the prompt is greedier than the spec.
-- I stopped after one measured change, which is what this unit asks for.
+- `search_listings` no longer returns jeans for `denim jacket`. An item noun in the query (`jacket`, `tee`, `dress`, …) now has to appear in the listing title, category, or tags. Local check: `denim jacket` under $50 is two jackets only; `vintage graphic tee` under $30 still leads with the butterfly baby tee; the ballgown query is still empty.
+- Empty wardrobe prompt now forbids inventing a fake closet. Rechecked with `--empty-wardrobe`.
+- Fit cards already used `$` + digits + platform on the after log; that guard stayed.
+
+Still adjacent, not a missed criterion: `denim jacket` can still return the navy track jacket, because that listing really is a jacket. I stopped once jeans were gone. Empty-wardrobe outfits still name generic silhouettes (ribbed tank, loafers) — that is the spec, not a fake closet.
 
 
 

@@ -35,6 +35,15 @@ _SHOE_RE = re.compile(r"\bus\s+(\d+(?:\.\d+)?)\b", re.IGNORECASE)
 _WAIST_RE = re.compile(r"\bw(\d+)\b", re.IGNORECASE)
 _ONE_SIZE_RE = re.compile(r"\bone\s*size\b", re.IGNORECASE)
 _LETTER_TOKEN_RE = re.compile(r"[A-Z0-9.]+")
+_ITEM_NOUNS = {
+    "jacket", "coat", "hoodie", "blazer", "cardigan", "sweater",
+    "tee", "tshirt", "shirt", "tank",
+    "dress", "skirt",
+    "jean", "jeans", "trouser", "trousers", "pant", "pants",
+    "short", "shorts",
+    "sneaker", "sneakers", "boot", "boots", "shoe", "shoes",
+    "belt", "bag", "hat",
+}
 
 
 def _letter_tokens(size_str: str) -> set[str]:
@@ -128,6 +137,23 @@ def _keyword_score(listing: dict, description: str) -> int:
     if phrase and phrase in primary_text.lower():
         score += 2
     return score
+
+
+def _item_nouns(description: str) -> list[str]:
+    return [t for t in _tokens(description) if t in _ITEM_NOUNS]
+
+
+def _primary_has_noun(listing: dict, noun: str) -> bool:
+    primary = _tokens(
+        " ".join(
+            [
+                listing.get("title") or "",
+                listing.get("category") or "",
+                " ".join(listing.get("style_tags") or []),
+            ]
+        )
+    )
+    return any(_tokens_close(noun, t) for t in primary)
 
 
 def _sentence_count(text: str) -> int:
@@ -256,6 +282,9 @@ def search_listings(
         score = _keyword_score(listing, description)
         if score <= 0:
             continue
+        nouns = _item_nouns(description)
+        if nouns and not all(_primary_has_noun(listing, noun) for noun in nouns):
+            continue
         scored.append((score, listing))
 
     scored.sort(key=lambda pair: pair[0], reverse=True)
@@ -298,8 +327,10 @@ def suggest_outfit(new_item: dict, wardrobe: dict) -> str:
     if not items:
         prompt = (
             "A shopper has no saved wardrobe yet. Give general styling ideas "
-            "for this thrifted piece — silhouettes, colors, and shoes that "
-            "would work with it. One or two outfits. Be specific, not generic.\n\n"
+            "for this thrifted piece using only silhouettes, colors, and shoe "
+            "types (for example wide-leg trousers, a ribbed tank, chunky "
+            "sneakers). Do not invent named closet items, brands they own, "
+            "or a fake wardrobe. One or two outfits.\n\n"
             f"Item:\n{item_blurb}"
         )
     else:
