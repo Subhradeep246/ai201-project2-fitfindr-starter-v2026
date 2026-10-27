@@ -375,7 +375,7 @@ The criterion 4 near-miss: captions that say `thirty bucks` / `eighteen dollars`
 
 ### Run Log — After
 
-From `results/run_2026-10-26_1833_after.md`.
+From `results/run_2026-10-26_1950_after.md` (re-run after the search noun/token filter so the log matches the current tool). The earlier after file is `results/run_2026-10-26_1833_after.md`.
 
 | Criterion | Target | Try 1 | Try 2 | Try 3 | Try 4 | Try 5 | Verdict |
 |---|---|---|---|---|---|---|---|
@@ -386,7 +386,7 @@ From `results/run_2026-10-26_1833_after.md`.
 | 5. price ceiling holds | 5 of 5 | PASS | PASS | PASS | PASS | PASS | MET (5/5) |
 
 **Did it help, and how do I know:**
-The scoreboard did not move — C4 was already 5/5. The mechanism did. Before, C4 try 2 was `on depop for thirty bucks` with no `$30`. After, every C4 card uses `$30` and `depop` (`just $30 on depop`, five times). Criterion 1 try 5 went from `eighteen dollars` to `on depop for just $18`. I know because I compared those strings in the two run logs, not because the PASS count changed.
+The scoreboard did not move — C4 was already 5/5. The mechanism did. Before, C4 try 2 was `on depop for thirty bucks` with no `$30`. After, every C4 card uses `$30` and `depop`. Criterion 1 try 5 went from `eighteen dollars` to a `$18` caption. The 19:50 re-run also locks the search change in evidence: criterion 3 is `search_results: 1` (`Denim Jacket — Light Wash, Cropped` only), not the old 7-hit list with jeans and a track jacket.
 
 <!-- If it made things worse, say that. Honestly reported, that earns full
      credit and is more interesting than one that worked. -->
@@ -397,13 +397,9 @@ The scoreboard did not move — C4 was already 5/5. The mechanism did. Before, C
 
 ## What's Still Broken
 
-The five numbered criteria already MET. The leftover targets from the first after-run were adjacent, and this redo was those:
+The five numbered criteria still MET on `results/run_2026-10-26_1950_after.md`. That run is the one that matches the current search: denim-jacket queries are one listing, graphic-tee queries are three tees, slip-dress is one dress, ballgown is empty.
 
-- `search_listings` no longer returns jeans for `denim jacket`. An item noun in the query (`jacket`, `tee`, `dress`, …) now has to appear in the listing title, category, or tags. Local check: `denim jacket` under $50 is two jackets only; `vintage graphic tee` under $30 still leads with the butterfly baby tee; the ballgown query is still empty.
-- Empty wardrobe prompt now forbids inventing a fake closet. Rechecked with `--empty-wardrobe`.
-- Fit cards already used `$` + digits + platform on the after log; that guard stayed.
-
-Still adjacent, not a missed criterion: empty-wardrobe outfits still name generic silhouettes (ribbed tank, loafers) — that is the spec, not a fake closet. `denim jacket` now returns only the cropped denim jacket; the track jacket is gone because every query token has to appear in title/tags/category.
+Nothing from the redo list is still wrong. Empty-wardrobe outfits still name generic silhouettes (midi skirt, ribbed tank, sneakers) — that is the spec. I would not tighten that further.
 
 
 
